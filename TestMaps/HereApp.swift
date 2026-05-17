@@ -2,9 +2,9 @@ import SwiftUI
 
 @main
 struct HereApp: App {
-    @StateObject private var authVM = AuthViewModel()
+    @StateObject private var authVM          = AuthViewModel()
     @StateObject private var locationService = LocationService()
-    @StateObject private var feedVM = FeedViewModel()
+    @StateObject private var feedVM          = FeedViewModel()
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +20,10 @@ struct HereApp: App {
                 }
             }
             .preferredColorScheme(.light)
+            .task { await authVM.restoreSession() }
+            .onChange(of: authVM.isLoggedIn) { _, isLoggedIn in
+                if isLoggedIn { Task { await feedVM.fetchPosts() } }
+            }
         }
     }
 }

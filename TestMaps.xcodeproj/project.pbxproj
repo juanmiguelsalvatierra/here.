@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0FA9F9856518D0985BCC941E /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 8D155FEA6713BFE61A00D72E /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		97DF73022F924E2500FE192C /* TestMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0FA9F9856518D0985BCC941E /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = TestMaps;
 			packageProductDependencies = (
+				8D155FEA6713BFE61A00D72E /* Supabase */,
 			);
 			productName = TestMaps;
 			productReference = 97DF73022F924E2500FE192C /* TestMaps.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 97DF72F92F924E2500FE192C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F6B9E20A4146AAB2651CD67D /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 97DF73032F924E2500FE192C /* Products */;
 			projectDirPath = "";
@@ -332,6 +341,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F6B9E20A4146AAB2651CD67D /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8D155FEA6713BFE61A00D72E /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F6B9E20A4146AAB2651CD67D /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 97DF72FA2F924E2500FE192C /* Project object */;
 }

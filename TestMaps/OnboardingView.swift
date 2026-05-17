@@ -2,10 +2,10 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject var authVM: AuthViewModel
-    @State private var username: String = ""
-    @State private var password: String = ""
-    @State private var isSignUp: Bool = false
-    @State private var appeared: Bool = false
+    @State private var email    = ""
+    @State private var password = ""
+    @State private var isSignUp = false
+    @State private var appeared = false
 
     var body: some View {
         ZStack {
@@ -13,7 +13,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 0) {
 
-                // Wordmark
+                // MARK: Wordmark
                 Spacer().frame(height: 80)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("here.")
@@ -33,10 +33,14 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                // Form
+                // MARK: Form
                 VStack(spacing: Here.Spacing.sm) {
-                    HereTextField(placeholder: "benutzername", text: $username)
-                    HereTextField(placeholder: "passwort", text: $password, isSecure: true)
+                    HereField(placeholder: "e-mail", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+
+                    HereField(placeholder: "passwort", text: $password, isSecure: true)
+                        .textContentType(isSignUp ? .newPassword : .password)
                 }
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 16)
@@ -44,19 +48,45 @@ struct OnboardingView: View {
 
                 Spacer().frame(height: Here.Spacing.lg)
 
-                // Actions
+                // MARK: Actions
                 VStack(spacing: Here.Spacing.sm) {
-                    Button {
-                        authVM.login(username: username, password: password)
-                    } label: {
-                        Text(isSignUp ? "konto erstellen" : "anmelden")
+                    if let error = authVM.errorMessage {
+                        Text(error)
+                            .font(Here.Font.body(13))
+                            .foregroundColor(Here.Color.danger)
+                            .multilineTextAlignment(.center)
+                            .transition(.opacity)
                     }
-                    .herePrimary()
 
                     Button {
-                        withAnimation(.spring()) { isSignUp.toggle() }
+                        Task {
+                            if isSignUp {
+                                await authVM.signUp(email: email, password: password)
+                            } else {
+                                await authVM.signIn(email: email, password: password)
+                            }
+                        }
                     } label: {
-                        Text(isSignUp ? "bereits ein konto?" : "neu hier?")
+                        Group {
+                            if authVM.isLoading {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text(isSignUp ? "konto erstellen" : "anmelden")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                    }
+                    .herePrimary()
+                    .disabled(authVM.isLoading || email.isEmpty || password.isEmpty)
+
+                    Button {
+                        withAnimation(.spring()) {
+                            isSignUp.toggle()
+                            authVM.errorMessage = nil
+                        }
+                    } label: {
+                        Text(isSignUp ? "bereits ein konto? anmelden" : "neu hier? konto erstellen")
                             .font(Here.Font.body(14))
                             .foregroundColor(Here.Color.stone)
                     }
@@ -73,10 +103,12 @@ struct OnboardingView: View {
     }
 }
 
-struct HereTextField: View {
-    var placeholder: String
+// MARK: - Text Field
+
+private struct HereField: View {
+    let placeholder: String
     @Binding var text: String
-    var isSecure: Bool = false
+    var isSecure = false
 
     var body: some View {
         Group {
@@ -84,8 +116,8 @@ struct HereTextField: View {
                 SecureField(placeholder, text: $text)
             } else {
                 TextField(placeholder, text: $text)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
             }
         }
         .font(Here.Font.body(16))
