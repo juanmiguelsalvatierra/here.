@@ -158,22 +158,31 @@ struct PostCard: View {
             }
             .padding(.bottom, Here.Spacing.md)
 
-            // ── Photo placeholder ─────────────────────────────────
-            ZStack {
-                RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
-                    .fill(Here.Color.cloud)
+            // ── Photo ─────────────────────────────────────────────
+            if let local = post.localImage {
+                Image(uiImage: local)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
                     .frame(height: 200)
-
-                VStack(spacing: 8) {
-                    Image(systemName: "camera")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundColor(Here.Color.stone.opacity(0.5))
-                    Text("foto")
-                        .font(Here.Font.body(12))
-                        .foregroundColor(Here.Color.stone.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                    .padding(.bottom, Here.Spacing.md)
+            } else if let urlString = post.imageURL, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                            .frame(maxWidth: .infinity).frame(height: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                    case .empty:
+                        RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
+                            .fill(Here.Color.cloud).frame(height: 200)
+                            .overlay(ProgressView().tint(Here.Color.stone))
+                    default: EmptyView()
+                    }
                 }
+                .padding(.bottom, Here.Spacing.md)
             }
-            .padding(.bottom, Here.Spacing.md)
 
             // ── Caption ────────────────────────────────────────────
             Text(post.caption)

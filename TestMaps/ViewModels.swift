@@ -35,16 +35,20 @@ class FeedViewModel: ObservableObject {
     // MARK: Create post
     func createPost(caption: String, coordinate: CLLocationCoordinate2D,
                     locationName: String, author: User,
+                    imageURL: String? = nil,
+                    localImage: UIImage? = nil,
                     visibility: PostVisibility = .friends,
                     audienceIDs: [String] = []) async throws {
-        let data = try await SupabaseClient.post("/rest/v1/posts", body: [
+        var body: [String: Any] = [
             "author_id":     author.id,
             "caption":       caption,
             "latitude":      coordinate.latitude,
             "longitude":     coordinate.longitude,
             "location_name": locationName,
             "visibility":    visibility.rawValue
-        ])
+        ]
+        if let url = imageURL { body["image_url"] = url }
+        let data = try await SupabaseClient.post("/rest/v1/posts", body: body)
         let rows = try JSONDecoder().decode([DBNewPost].self, from: data)
         guard let row = rows.first else { return }
         // If selected visibility, insert audience rows
@@ -54,15 +58,16 @@ class FeedViewModel: ObservableObject {
                                                  body: ["post_id": row.id, "user_id": uid])
             }
         }
-        let post = LocationPost(
+        var post = LocationPost(
             id: row.id, authorID: author.id, author: author,
-            caption: caption, imageURL: nil,
+            caption: caption, imageURL: imageURL,
             coordinate: PostCoordinate(latitude: coordinate.latitude,
                                        longitude: coordinate.longitude),
             locationName: locationName, timestamp: Date(),
             reactions: [], joinedUserIDs: [], joinedUsers: [],
             visibility: visibility
         )
+        post.localImage = localImage
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             posts.insert(post, at: 0)
         }
@@ -159,6 +164,105 @@ class FeedViewModel: ObservableObject {
     func markAllRead() {
         for i in notifications.indices { notifications[i].isRead = true }
     }
+
+    // MARK: - Realtime
+
+    func connectRealtime(_ service: RealtimeService) {
+        service.onInsert = { [weak self] table, record in
+            Task { @MainActor [weak self] in
+                await self?.handleInsert(table: table, record: record)
+            }
+        }
+        service.onDelete = { [weak self] table, record in
+            Task { @MainActor [weak self] in
+                self?.handleDelete(table: table, record: record)
+            }
+        }
+    }
+
+    @MainActor
+    private func handleInsert(table: String, record: [String: Any]) async {
+        switch table {
+        case "posts":
+            guard let id = record["id"] as? String else { return }
+            guard !posts.contains(where: { $0.id == id }) else { return }  // already added optimistically
+            if let post = try? await fetchSinglePost(id: id) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    posts.insert(post, at: 0)
+                }
+            }
+
+        case "reactions":
+            guard
+                let postID = record["post_id"] as? String,
+                let userID = record["user_id"] as? String,
+                let emoji  = record["emoji"]   as? String,
+                let id     = record["id"]      as? String,
+                let idx    = posts.firstIndex(where: { $0.id == postID })
+            else { return }
+            let reaction = Reaction(id: id, userID: userID, emoji: emoji, timestamp: Date())
+            posts[idx].reactions.removeAll { $0.userID == userID }
+            withAnimation { posts[idx].reactions.append(reaction) }
+
+        case "post_joins":
+            guard
+                let postID = record["post_id"] as? String,
+                let userID = record["user_id"] as? String,
+                let idx    = posts.firstIndex(where: { $0.id == postID })
+            else { return }
+            guard !posts[idx].joinedUserIDs.contains(userID) else { return }
+            withAnimation { posts[idx].joinedUserIDs.append(userID) }
+
+        case "comments":
+            guard
+                let postID = record["post_id"] as? String,
+                let userID = record["user_id"] as? String,
+                let text   = record["text"]    as? String,
+                let id     = record["id"]      as? String,
+                let idx    = posts.firstIndex(where: { $0.id == postID })
+            else { return }
+            let comment = Comment(id: id, userID: userID, user: nil, text: text, timestamp: Date())
+            withAnimation { posts[idx].comments.append(comment) }
+
+        default: break
+        }
+    }
+
+    @MainActor
+    private func handleDelete(table: String, record: [String: Any]) {
+        switch table {
+        case "reactions":
+            guard
+                let postID = record["post_id"] as? String,
+                let userID = record["user_id"] as? String,
+                let idx    = posts.firstIndex(where: { $0.id == postID })
+            else { return }
+            withAnimation { posts[idx].reactions.removeAll { $0.userID == userID } }
+
+        case "post_joins":
+            guard
+                let postID = record["post_id"] as? String,
+                let userID = record["user_id"] as? String,
+                let idx    = posts.firstIndex(where: { $0.id == postID })
+            else { return }
+            withAnimation { posts[idx].joinedUserIDs.removeAll { $0 == userID } }
+
+        default: break
+        }
+    }
+
+    private func fetchSinglePost(id: String) async throws -> LocationPost {
+        let data = try await SupabaseClient.get("/rest/v1/posts", query: [
+            URLQueryItem(name: "id",     value: "eq.\(id)"),
+            URLQueryItem(name: "select", value: "*,profiles(*),reactions(*),post_joins(*,profiles(*)),comments(*,profiles(*))"),
+            URLQueryItem(name: "limit",  value: "1")
+        ])
+        let decoder = JSONDecoder()
+        let rows = try decoder.decode([DBPost].self, from: data)
+        guard let row = rows.first else { throw URLError(.cannotFindHost) }
+        return row.toPost()
+    }
+
 }
 
 // MARK: - New Post ViewModel
@@ -183,10 +287,18 @@ class NewPostViewModel: ObservableObject {
         let name = placeName.isEmpty ? "Unbekannter Ort" : placeName
         Task {
             do {
+                // Upload photo if one is selected
+                var uploadedURL: String?
+                if let image = selectedImage,
+                   let jpeg  = image.jpegCompressed() {
+                    let path = "post-images/\(author.id)/\(UUID().uuidString).jpg"
+                    uploadedURL = try? await SupabaseClient.upload(bucket: "post-images", path: path, data: jpeg)
+                }
                 try await feed.createPost(
                     caption: trimmed, coordinate: loc, locationName: name,
-                    author: author, visibility: visibility,
-                    audienceIDs: Array(audienceIDs)
+                    author: author, imageURL: uploadedURL,
+                    localImage: selectedImage,
+                    visibility: visibility, audienceIDs: Array(audienceIDs)
                 )
                 didPost = true
             } catch {
@@ -440,14 +552,14 @@ private struct DBProfileSlim: Decodable {
 private struct DBPost: Decodable {
     let id: String; let authorId: String; let caption: String
     let imageUrl: String?; let latitude: Double; let longitude: Double
-    let locationName: String; let createdAt: String
+    let locationName: String; let createdAt: String; let visibility: String?
     let profiles:  DBProfile
     let reactions: [DBReaction]
     let postJoins: [DBJoin]
     let comments:  [DBComment]
 
     enum CodingKeys: String, CodingKey {
-        case id, caption, latitude, longitude, reactions, comments, profiles
+        case id, caption, latitude, longitude, reactions, comments, profiles, visibility
         case authorId     = "author_id"
         case imageUrl     = "image_url"
         case locationName = "location_name"
@@ -473,7 +585,8 @@ private struct DBPost: Decodable {
                 Comment(id: c.id, userID: c.userId, user: c.profiles?.toUser(),
                         text: c.text,
                         timestamp: iso.date(from: c.createdAt) ?? Date())
-            }
+            },
+            visibility: PostVisibility(rawValue: visibility ?? "friends") ?? .friends
         )
     }
 }

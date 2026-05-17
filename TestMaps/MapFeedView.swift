@@ -86,7 +86,6 @@ struct MapFeedView: View {
                 if let post = selectedPost {
                     MapPostCard(post: post)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .onTapGesture { selectedPost = nil }
                 }
 
                 // ── CTA button ───────────────────────────────────
@@ -107,7 +106,7 @@ struct MapFeedView: View {
                     .clipShape(RoundedRectangle(cornerRadius: Here.Radius.lg, style: .continuous))
                 }
                 .padding(.horizontal, Here.Spacing.lg)
-                .padding(.bottom, 80)
+                .padding(.bottom, 50)
             }
         }
         .sheet(isPresented: $showNewPost) {
@@ -171,46 +170,81 @@ struct MapPostCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Here.Spacing.sm) {
-            HStack(spacing: Here.Spacing.sm) {
-                if let author = post.author {
-                    AvatarView(user: author, size: 40)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text(post.author?.displayName ?? "")
-                            .font(Here.Font.body(14, weight: .semibold))
-                            .foregroundColor(Here.Color.ink)
-                        Text("·")
-                            .foregroundColor(Here.Color.stone)
-                        Text(post.timeAgo)
-                            .font(Here.Font.body(13))
+
+            // Tappable area — opens full post
+            Button { showFullPost = true } label: {
+                VStack(alignment: .leading, spacing: Here.Spacing.sm) {
+                    HStack(spacing: Here.Spacing.sm) {
+                        if let author = post.author {
+                            AvatarView(user: author, size: 40)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(post.author?.displayName ?? "")
+                                    .font(Here.Font.body(14, weight: .semibold))
+                                    .foregroundColor(Here.Color.ink)
+                                Text("·")
+                                    .foregroundColor(Here.Color.stone)
+                                Text(post.timeAgo)
+                                    .font(Here.Font.body(13))
+                                    .foregroundColor(Here.Color.stone)
+                            }
+                            Text(post.locationName)
+                                .font(Here.Font.mono(11))
+                                .foregroundColor(Here.Color.stone)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(Here.Color.stone)
                     }
-                    Text(post.locationName)
-                        .font(Here.Font.mono(11))
-                        .foregroundColor(Here.Color.stone)
-                }
-                Spacer()
-            }
 
-            Text(post.caption)
-                .font(Here.Font.body(15))
-                .foregroundColor(Here.Color.ink)
-                .lineLimit(2)
+                    // Image preview
+                    if let local = post.localImage {
+                        Image(uiImage: local)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 160)
+                            .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                    } else if let urlString = post.imageURL, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().scaledToFill()
+                                    .frame(maxWidth: .infinity).frame(height: 160)
+                                    .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                            case .empty:
+                                RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
+                                    .fill(Here.Color.cloud).frame(height: 160)
+                                    .overlay(ProgressView().tint(Here.Color.stone))
+                            default: EmptyView()
+                            }
+                        }
+                    }
 
-            // Who's joined
-            if let joined = post.joinedUsers, !joined.isEmpty {
-                HStack(spacing: 6) {
-                    StackedAvatarsView(users: joined, size: 22)
-                    Text("\(joined.count) dabei")
-                        .font(Here.Font.body(12))
-                        .foregroundColor(Here.Color.stone)
+                    Text(post.caption)
+                        .font(Here.Font.body(15))
+                        .foregroundColor(Here.Color.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    // Who's joined
+                    if let joined = post.joinedUsers, !joined.isEmpty {
+                        HStack(spacing: 6) {
+                            StackedAvatarsView(users: joined, size: 22)
+                            Text("\(joined.count) dabei")
+                                .font(Here.Font.body(12))
+                                .foregroundColor(Here.Color.stone)
+                        }
+                    }
                 }
             }
-            
+            .buttonStyle(.plain)
+
             Divider()
                 .padding(.vertical, 4)
-            
+
             // Actions
             HStack(spacing: Here.Spacing.md) {
                 // Join Button
@@ -309,108 +343,83 @@ struct MapPostDetailView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Here.Spacing.md) {
-                
-                // Header
-                HStack(spacing: Here.Spacing.sm) {
-                    if let author = post.author {
-                        AvatarView(user: author, size: 48)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(post.author?.displayName ?? "")
-                            .font(Here.Font.body(16, weight: .semibold))
-                            .foregroundColor(Here.Color.ink)
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(Here.Color.stone)
-                            Text(post.locationName)
-                                .font(Here.Font.mono(12))
-                                .foregroundColor(Here.Color.stone)
+        VStack(spacing: 0) {
+            // ── Scrollable content ────────────────────────────────
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Here.Spacing.sm) {
+
+                    // Header
+                    HStack(spacing: Here.Spacing.sm) {
+                        if let author = post.author {
+                            AvatarView(user: author, size: 42)
                         }
-                    }
-                    Spacer()
-                    Text(post.timeAgo)
-                        .font(Here.Font.body(13))
-                        .foregroundColor(Here.Color.stone)
-                }
-                
-                // Caption
-                Text(post.caption)
-                    .font(Here.Font.body(16))
-                    .foregroundColor(Here.Color.ink)
-                    .lineSpacing(3)
-                
-                // Photo placeholder
-                ZStack {
-                    RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
-                        .fill(Here.Color.cloud)
-                        .frame(height: 250)
-                    
-                    VStack(spacing: 8) {
-                        Image(systemName: "camera")
-                            .font(.system(size: 32, weight: .light))
-                            .foregroundColor(Here.Color.stone.opacity(0.5))
-                        Text("foto")
-                            .font(Here.Font.body(13))
-                            .foregroundColor(Here.Color.stone.opacity(0.5))
-                    }
-                }
-                
-                // Who's joined
-                if let joined = post.joinedUsers, !joined.isEmpty {
-                    VStack(alignment: .leading, spacing: Here.Spacing.xs) {
-                        Text("dabei")
-                            .font(Here.Font.body(12, weight: .medium))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(post.author?.displayName ?? "")
+                                .font(Here.Font.body(15, weight: .semibold))
+                                .foregroundColor(Here.Color.ink)
+                            HStack(spacing: 4) {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(Here.Color.stone)
+                                Text(post.locationName)
+                                    .font(Here.Font.mono(11))
+                                    .foregroundColor(Here.Color.stone)
+                            }
+                        }
+                        Spacer()
+                        Text(post.timeAgo)
+                            .font(Here.Font.body(12))
                             .foregroundColor(Here.Color.stone)
-                            .textCase(.uppercase)
-                        
+                    }
+
+                    // Caption
+                    Text(post.caption)
+                        .font(Here.Font.body(15))
+                        .foregroundColor(Here.Color.ink)
+                        .lineSpacing(2)
+
+                    // Photo
+                    if let local = post.localImage {
+                        Image(uiImage: local)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                    } else if let urlString = post.imageURL, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                            case .empty:
+                                RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
+                                    .fill(Here.Color.cloud).frame(height: 220)
+                                    .overlay(ProgressView().tint(Here.Color.stone))
+                            default: EmptyView()
+                            }
+                        }
+                    }
+
+                    // Who's joined
+                    if let joined = post.joinedUsers, !joined.isEmpty {
                         HStack(spacing: 8) {
-                            StackedAvatarsView(users: joined, size: 28)
-                            Text("\(joined.count) \(joined.count == 1 ? "person" : "personen")")
-                                .font(Here.Font.body(14))
+                            StackedAvatarsView(users: joined, size: 24)
+                            Text("\(joined.count) \(joined.count == 1 ? "person" : "personen") dabei")
+                                .font(Here.Font.body(13))
                                 .foregroundColor(Here.Color.stone)
                         }
                     }
-                    .padding(.top, Here.Spacing.xs)
-                }
-                
-                Divider()
-                    .padding(.vertical, Here.Spacing.xs)
-                
-                // Actions
-                VStack(spacing: Here.Spacing.md) {
-                    // Join Button
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
-                            feedVM.toggleJoin(postID: post.id, userID: authVM.currentUser.id)
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: currentUserJoined ? "checkmark.circle.fill" : "person.badge.plus")
-                                .font(.system(size: 16, weight: .medium))
-                            Text(currentUserJoined ? "Du bist dabei ✓" : "Joinen")
-                                .font(Here.Font.body(16, weight: .semibold))
-                        }
-                        .foregroundColor(currentUserJoined ? Here.Color.white : Here.Color.ink)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(currentUserJoined ? Here.Color.ink : Here.Color.cloud)
-                        .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
-                                .strokeBorder(currentUserJoined ? Here.Color.ink : Here.Color.border, lineWidth: 1.5)
-                        )
-                    }
-                    
+
+                    Divider()
+
                     // Reactions
-                    VStack(alignment: .leading, spacing: Here.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: Here.Spacing.xs) {
                         Text("reaktionen")
-                            .font(Here.Font.body(12, weight: .medium))
+                            .font(Here.Font.body(11, weight: .medium))
                             .foregroundColor(Here.Color.stone)
                             .textCase(.uppercase)
-                        
+
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(reactionGroups, id: \.emoji) { group in
@@ -422,22 +431,19 @@ struct MapPostDetailView: View {
                                         feedVM.addReaction(postID: post.id, emoji: group.emoji, userID: authVM.currentUser.id)
                                     }
                                 }
-                                
                                 Button {
-                                    withAnimation(.spring(response: 0.3)) {
-                                        showReactionPicker.toggle()
-                                    }
+                                    withAnimation(.spring(response: 0.3)) { showReactionPicker.toggle() }
                                 } label: {
                                     Image(systemName: "plus")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.system(size: 13, weight: .medium))
                                         .foregroundColor(Here.Color.stone)
-                                        .padding(10)
+                                        .padding(9)
                                         .background(Here.Color.cloud)
                                         .clipShape(Circle())
                                 }
                             }
                         }
-                        
+
                         if showReactionPicker {
                             MapEmojiPickerRow { emoji in
                                 feedVM.addReaction(postID: post.id, emoji: emoji, userID: authVM.currentUser.id)
@@ -446,31 +452,54 @@ struct MapPostDetailView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
                     }
-                    
+
                     // Comments
-                    Button {
-                        showComments = true
-                    } label: {
+                    Button { showComments = true } label: {
                         HStack {
                             Image(systemName: "bubble.left")
-                                .font(.system(size: 16, weight: .medium))
-                            Text(post.comments.isEmpty ? "Kommentieren" : "\(post.comments.count) Kommentare anzeigen")
-                                .font(Here.Font.body(16, weight: .medium))
+                                .font(.system(size: 15, weight: .medium))
+                            Text(post.comments.isEmpty ? "Kommentieren" : "\(post.comments.count) Kommentare")
+                                .font(Here.Font.body(15, weight: .medium))
                             Spacer()
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                         }
                         .foregroundColor(Here.Color.ink)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                        .padding(.vertical, 13)
                         .padding(.horizontal, Here.Spacing.md)
                         .background(Here.Color.cloud)
                         .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
                     }
                 }
-                
+                .padding(Here.Spacing.md)
             }
-            .padding(Here.Spacing.lg)
+
+            // ── Fixed Join button ─────────────────────────────────
+            Divider()
+            Button {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                    feedVM.toggleJoin(postID: post.id, userID: authVM.currentUser.id)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: currentUserJoined ? "checkmark.circle.fill" : "person.badge.plus")
+                        .font(.system(size: 16, weight: .medium))
+                    Text(currentUserJoined ? "Du bist dabei ✓" : "Joinen")
+                        .font(Here.Font.body(16, weight: .semibold))
+                }
+                .foregroundColor(currentUserJoined ? Here.Color.white : Here.Color.ink)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(currentUserJoined ? Here.Color.ink : Here.Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Here.Radius.md, style: .continuous)
+                        .strokeBorder(currentUserJoined ? Here.Color.ink : Here.Color.border, lineWidth: 1.5)
+                )
+            }
+            .padding(.horizontal, Here.Spacing.md)
+            .padding(.vertical, Here.Spacing.sm)
+            .background(Here.Color.white)
         }
         .background(Here.Color.white)
         .navigationTitle("aktivität")

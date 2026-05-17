@@ -138,6 +138,15 @@ struct NewPostView: View {
                                          audienceIDs: $vm.audienceIDs,
                                          friends: friendVM.friends)
 
+                        // ── Error ──────────────────────────────────────
+                        if let err = vm.errorMessage {
+                            Text(err)
+                                .font(Here.Font.body(13))
+                                .foregroundColor(Here.Color.danger)
+                                .multilineTextAlignment(.center)
+                                .transition(.opacity)
+                        }
+
                         // ── Submit ─────────────────────────────────────
                         Button {
                             vm.submit(
@@ -216,13 +225,13 @@ struct VisibilityPicker: View {
                             visibility = option
                         }
                     } label: {
-                        HStack(spacing: 5) {
+                        VStack(spacing: 3) {
                             Image(systemName: option.icon)
-                                .font(.system(size: 12))
+                                .font(.system(size: 13, weight: .medium))
                             Text(option.label)
-                                .font(Here.Font.body(13))
+                                .font(Here.Font.body(11, weight: .medium))
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, Here.Spacing.md)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity)
                         .background(visibility == option ? Here.Color.ink : Here.Color.cloud)

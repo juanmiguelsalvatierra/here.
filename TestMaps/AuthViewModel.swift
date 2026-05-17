@@ -18,6 +18,7 @@ final class AuthViewModel: ObservableObject {
         guard let token = KeychainStore.read("access_token") else { return }
         do {
             let authUser = try await fetchAuthUser(token: token)
+            await ensureProfile(userID: authUser.id, email: authUser.email, token: token)
             let profile  = try? await fetchProfile(userID: authUser.id, token: token)
             currentUser  = profile?.toUser() ?? fallbackUser(authUser)
             isLoggedIn   = true
@@ -59,6 +60,7 @@ final class AuthViewModel: ObservableObject {
         do {
             let resp = try await supabaseAuth(endpoint: "token?grant_type=password", email: email, password: password)
             storeSession(resp)
+            await ensureProfile(userID: resp.user.id, email: resp.user.email, token: resp.accessToken)
             let profile = try? await fetchProfile(userID: resp.user.id, token: resp.accessToken)
             currentUser = profile?.toUser() ?? fallbackUser(resp.user)
             isLoggedIn  = true
@@ -67,6 +69,55 @@ final class AuthViewModel: ObservableObject {
         } catch {
             errorMessage = "Anmeldung fehlgeschlagen – bitte nochmal versuchen."
         }
+    }
+
+
+    // MARK: Update Profile
+    func updateProfile(displayName: String, bio: String, avatarImage: UIImage?) async {
+        isLoading = true; errorMessage = nil
+        defer { isLoading = false }
+        do {
+            var avatarURL = currentUser.avatarURL
+            // Upload new avatar if provided
+            if let image = avatarImage, let jpeg = image.jpegCompressed(maxDimension: 400) {
+                let path = "avatars/\(currentUser.id).jpg"
+                avatarURL = try await SupabaseClient.upload(bucket: "avatars", path: path, data: jpeg)
+            }
+            var body: [String: Any] = ["display_name": displayName, "bio": bio]
+            if let url = avatarURL { body["avatar_url"] = url }
+            try await SupabaseClient.patch(
+                "/rest/v1/profiles",
+                query: [URLQueryItem(name: "id", value: "eq.\(currentUser.id)")],
+                body: body
+            )
+            currentUser = User(
+                id: currentUser.id, username: currentUser.username,
+                displayName: displayName, avatarURL: avatarURL,
+                avatarColor: currentUser.avatarColor, bio: bio,
+                friendIDs: currentUser.friendIDs
+            )
+        } catch {
+            errorMessage = "Profil konnte nicht gespeichert werden."
+        }
+    }
+
+
+    // MARK: Ensure profile exists (safety net for accounts created before trigger)
+    private func ensureProfile(userID: String, email: String?, token: String) async {
+        if (try? await fetchProfile(userID: userID, token: token)) != nil { return }
+        // No profile row — create one now
+        let username = (email ?? userID)
+            .components(separatedBy: "@").first?
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9_.]", with: ".", options: .regularExpression)
+            ?? "user"
+        let safe = String(username.prefix(25)).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let final = safe.count < 3 ? safe + String(userID.prefix(4)) : safe
+        try? await SupabaseClient.upsert("/rest/v1/profiles", body: [
+            "id":           userID,
+            "username":     final,
+            "display_name": email?.components(separatedBy: "@").first ?? "here. user"
+        ])
     }
 
     // MARK: Logout

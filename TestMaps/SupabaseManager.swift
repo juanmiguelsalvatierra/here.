@@ -33,7 +33,15 @@ enum SupabaseClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 || status == 201 else { throw URLError(.badServerResponse) }
+        if status != 200 && status != 201 {
+            // Surface the real Supabase error message
+            if let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let msg  = body["message"] as? String {
+                throw NSError(domain: "Supabase", code: status,
+                              userInfo: [NSLocalizedDescriptionKey: msg])
+            }
+            throw URLError(.badServerResponse)
+        }
         return data
     }
 
@@ -66,6 +74,22 @@ enum SupabaseClient {
         guard status == 200 || status == 204 else { throw URLError(.badServerResponse) }
     }
 
+
+    // MARK: Storage upload — returns public URL
+    static func upload(bucket: String, path: String, data: Data, mimeType: String = "image/jpeg") async throws -> String {
+        let url = URL(string: "\(baseURL)/storage/v1/object/\(bucket)/\(path)")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(apiKey,   forHTTPHeaderField: "apikey")
+        req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+        req.setValue("true",   forHTTPHeaderField: "x-upsert")   // overwrite existing
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = data
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 201 else { throw URLError(.badServerResponse) }
+        return "\(baseURL)/storage/v1/object/public/\(bucket)/\(path)"
+    }
     // MARK: DELETE
     static func delete(_ path: String, query: [URLQueryItem]) async throws {
         var comps = URLComponents(string: "\(baseURL)\(path)")!

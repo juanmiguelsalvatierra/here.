@@ -39,6 +39,14 @@ struct LocationPost: Identifiable, Codable {
     var comments: [Comment] = []
     var visibility: PostVisibility = .friends
     var isFavorited: Bool = false
+    // Transient — holds picked UIImage for instant display, not persisted
+    var localImage: UIImage? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, authorID, author, caption, imageURL, coordinate,
+             locationName, timestamp, reactions, joinedUserIDs,
+             joinedUsers, comments, visibility, isFavorited
+    }
 
     var timeAgo: String {
         let diff = Date().timeIntervalSince(timestamp)

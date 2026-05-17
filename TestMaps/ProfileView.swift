@@ -7,6 +7,7 @@ struct ProfileView: View {
     @EnvironmentObject var friendVM: FriendViewModel
     @State private var showLogoutAlert = false
     @State private var showFriends     = false
+    @State private var showEdit        = false
 
     private var myPosts: [LocationPost] {
         feedVM.posts.filter { $0.authorID == authVM.currentUser.id }
@@ -106,10 +107,23 @@ struct ProfileView: View {
             }
             .background(Here.Color.white)
         }
+        .sheet(isPresented: $showEdit) {
+            ProfileEditView(user: authVM.currentUser)
+                .environmentObject(authVM)
+        }
         .sheet(isPresented: $showFriends) {
             FriendSearchView()
                 .environmentObject(authVM)
                 .environmentObject(friendVM)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showEdit = true } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Here.Color.ink)
+                }
+            }
         }
         .alert("abmelden?", isPresented: $showLogoutAlert) {
             Button("abmelden", role: .destructive) { authVM.logout() }
