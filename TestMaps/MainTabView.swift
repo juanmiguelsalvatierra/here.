@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @EnvironmentObject var feedVM: FeedViewModel
+    @EnvironmentObject var authVM:   AuthViewModel
+    @EnvironmentObject var feedVM:   FeedViewModel
+    @EnvironmentObject var friendVM: FriendViewModel
     @State private var selectedTab: Int = 0
     @StateObject private var favVM = FavoritesViewModel()
 
@@ -12,14 +14,18 @@ struct MainTabView: View {
                     .tag(0)
                 FeedView()
                     .tag(1)
+                SearchView()
+                    .environmentObject(authVM)
+                    .environmentObject(feedVM)
+                    .environmentObject(friendVM)
+                    .tag(2)
                 FavoritesView()
                     .environmentObject(favVM)
-                    .tag(2)
-                ProfileView()
                     .tag(3)
+                ProfileView()
+                    .tag(4)
             }
 
-            // Custom tab bar
             HereTabBar(selectedTab: $selectedTab, unreadCount: feedVM.unreadCount)
         }
         .ignoresSafeArea(.keyboard)
@@ -31,10 +37,11 @@ struct HereTabBar: View {
     var unreadCount: Int
 
     private let items: [(icon: String, label: String)] = [
-        ("map",              "karte"),
-        ("list.bullet",      "feed"),
-        ("heart",            "saved"),
-        ("person",           "ich"),
+        ("map",            "karte"),
+        ("list.bullet",    "feed"),
+        ("magnifyingglass.circle","suchen"),
+        ("heart",          "saved"),
+        ("person",         "ich"),
     ]
 
     var body: some View {
@@ -51,7 +58,6 @@ struct HereTabBar: View {
                                 .font(.system(size: 20, weight: .medium))
                                 .foregroundColor(selectedTab == idx ? Here.Color.ink : Here.Color.stone)
 
-                            // Notification badge on feed tab
                             if idx == 1 && unreadCount > 0 {
                                 Circle()
                                     .fill(Here.Color.ink)
@@ -84,4 +90,5 @@ struct HereTabBar: View {
         .environmentObject(AuthViewModel())
         .environmentObject(LocationService())
         .environmentObject(FeedViewModel())
+        .environmentObject(FriendViewModel())
 }

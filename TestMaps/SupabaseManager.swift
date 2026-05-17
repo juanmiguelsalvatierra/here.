@@ -51,6 +51,21 @@ enum SupabaseClient {
         guard status == 200 || status == 201 else { throw URLError(.badServerResponse) }
     }
 
+    // MARK: PATCH
+    static func patch(_ path: String, query: [URLQueryItem], body: [String: Any]) async throws {
+        var comps = URLComponents(string: "\(baseURL)\(path)")!
+        comps.queryItems = query
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = "PATCH"
+        req.setValue(apiKey,             forHTTPHeaderField: "apikey")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 204 else { throw URLError(.badServerResponse) }
+    }
+
     // MARK: DELETE
     static func delete(_ path: String, query: [URLQueryItem]) async throws {
         var comps = URLComponents(string: "\(baseURL)\(path)")!

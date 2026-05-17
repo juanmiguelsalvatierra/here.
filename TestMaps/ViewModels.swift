@@ -34,25 +34,34 @@ class FeedViewModel: ObservableObject {
 
     // MARK: Create post
     func createPost(caption: String, coordinate: CLLocationCoordinate2D,
-                    locationName: String, author: User) async throws {
+                    locationName: String, author: User,
+                    visibility: PostVisibility = .friends,
+                    audienceIDs: [String] = []) async throws {
         let data = try await SupabaseClient.post("/rest/v1/posts", body: [
             "author_id":     author.id,
             "caption":       caption,
             "latitude":      coordinate.latitude,
             "longitude":     coordinate.longitude,
-            "location_name": locationName
+            "location_name": locationName,
+            "visibility":    visibility.rawValue
         ])
-        // POST returns only the inserted row's columns (no joins).
-        // Decode just the id, build the rest locally.
         let rows = try JSONDecoder().decode([DBNewPost].self, from: data)
         guard let row = rows.first else { return }
+        // If selected visibility, insert audience rows
+        if visibility == .selected && !audienceIDs.isEmpty {
+            for uid in audienceIDs {
+                try? await SupabaseClient.upsert("/rest/v1/post_audience",
+                                                 body: ["post_id": row.id, "user_id": uid])
+            }
+        }
         let post = LocationPost(
             id: row.id, authorID: author.id, author: author,
             caption: caption, imageURL: nil,
             coordinate: PostCoordinate(latitude: coordinate.latitude,
                                        longitude: coordinate.longitude),
             locationName: locationName, timestamp: Date(),
-            reactions: [], joinedUserIDs: [], joinedUsers: []
+            reactions: [], joinedUserIDs: [], joinedUsers: [],
+            visibility: visibility
         )
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             posts.insert(post, at: 0)
@@ -156,11 +165,13 @@ class FeedViewModel: ObservableObject {
 
 @MainActor
 class NewPostViewModel: ObservableObject {
-    @Published var caption:       String   = ""
+    @Published var caption:       String          = ""
     @Published var selectedImage: UIImage?
-    @Published var isPosting:     Bool     = false
-    @Published var didPost:       Bool     = false
+    @Published var isPosting:     Bool            = false
+    @Published var didPost:       Bool            = false
     @Published var errorMessage:  String?
+    @Published var visibility:    PostVisibility  = .friends
+    @Published var audienceIDs:   Set<String>     = []
 
     func submit(author: User, coordinate: CLLocationCoordinate2D?,
                 placeName: String, feed: FeedViewModel) {
@@ -172,8 +183,11 @@ class NewPostViewModel: ObservableObject {
         let name = placeName.isEmpty ? "Unbekannter Ort" : placeName
         Task {
             do {
-                try await feed.createPost(caption: trimmed, coordinate: loc,
-                                          locationName: name, author: author)
+                try await feed.createPost(
+                    caption: trimmed, coordinate: loc, locationName: name,
+                    author: author, visibility: visibility,
+                    audienceIDs: Array(audienceIDs)
+                )
                 didPost = true
             } catch {
                 print("[here.] createPost error: \(error)")
@@ -183,7 +197,10 @@ class NewPostViewModel: ObservableObject {
         }
     }
 
-    func reset() { caption = ""; selectedImage = nil; didPost = false; errorMessage = nil }
+    func reset() {
+        caption = ""; selectedImage = nil; didPost = false
+        errorMessage = nil; visibility = .friends; audienceIDs = []
+    }
 }
 
 // MARK: - Comment ViewModel
@@ -251,6 +268,170 @@ class FavoritesViewModel: ObservableObject {
         let act = FavoriteActivity(id: UUID().uuidString, postID: post.id, imageURL: post.imageURL,
                                    caption: post.caption, locationName: post.locationName, savedAt: Date())
         withAnimation { activities.append(act) }
+    }
+}
+
+// MARK: - Friend ViewModel
+
+@MainActor
+class FriendViewModel: ObservableObject {
+    @Published var friends:          [User]       = []
+    @Published var incoming:         [Friendship] = []  // pending requests TO me
+    @Published var searchResults:    [User]       = []
+    @Published var isSearching:      Bool         = false
+    @Published var errorMessage:     String?
+
+    // Cache of friendship statuses for search results: userID → status/nil
+    @Published var statusCache:      [String: String] = [:]
+
+    // MARK: Load on login
+    func refresh(userID: String) async {
+        await withTaskGroup(of: Void.self) { g in
+            g.addTask { await self.fetchFriends(userID: userID) }
+            g.addTask { await self.fetchIncoming(userID: userID) }
+        }
+    }
+
+    // MARK: Search users by username
+    func search(query: String, myID: String) async {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { searchResults = []; return }
+        isSearching = true
+        defer { isSearching = false }
+        do {
+            let data = try await SupabaseClient.get("/rest/v1/profiles", query: [
+                URLQueryItem(name: "username", value: "ilike.*\(q)*"),
+                URLQueryItem(name: "select",   value: "id,username,display_name,avatar_url,avatar_color"),
+                URLQueryItem(name: "limit",    value: "20")
+            ])
+            let rows = try JSONDecoder().decode([DBProfileSlim].self, from: data)
+            searchResults = rows.compactMap { $0.id == myID ? nil : $0.toUser() }
+            await refreshStatusCache(myID: myID)
+        } catch { errorMessage = "Suche fehlgeschlagen." }
+    }
+
+    // MARK: Send friend request
+    func sendRequest(to userID: String, myID: String) async {
+        do {
+            _ = try await SupabaseClient.post("/rest/v1/friendships", body: [
+                "requester_id": myID,
+                "addressee_id": userID
+            ])
+            statusCache[userID] = "pending"
+        } catch { errorMessage = "Anfrage fehlgeschlagen." }
+    }
+
+    // MARK: Accept incoming request
+    func accept(friendshipID: String, requesterID: String) async {
+        do {
+            try await SupabaseClient.patch("/rest/v1/friendships",
+                                           query: [URLQueryItem(name: "id", value: "eq.\(friendshipID)")],
+                                           body: ["status": "accepted"])
+            incoming.removeAll { $0.id == friendshipID }
+            await fetchFriends(userID: SupabaseClient.token.map { _ in requesterID } ?? requesterID)
+        } catch { errorMessage = "Annehmen fehlgeschlagen." }
+    }
+
+    // MARK: Decline / remove
+    func remove(friendshipID: String) async {
+        do {
+            try await SupabaseClient.delete("/rest/v1/friendships", query: [
+                URLQueryItem(name: "id", value: "eq.\(friendshipID)")
+            ])
+            incoming.removeAll  { $0.id == friendshipID }
+            // also remove from friends if it was accepted
+        } catch { errorMessage = "Entfernen fehlgeschlagen." }
+    }
+
+    func removeFriend(friendID: String, myID: String) async {
+        do {
+            try await SupabaseClient.delete("/rest/v1/friendships", query: [
+                URLQueryItem(name: "or", value:
+                    "(and(requester_id.eq.\(myID),addressee_id.eq.\(friendID)),and(requester_id.eq.\(friendID),addressee_id.eq.\(myID)))")
+            ])
+            friends.removeAll { $0.id == friendID }
+            statusCache[friendID] = nil
+        } catch { errorMessage = "Entfernen fehlgeschlagen." }
+    }
+
+    // MARK: - Private
+
+    private func fetchFriends(userID: String) async {
+        do {
+            let data = try await SupabaseClient.get("/rest/v1/friendships", query: [
+                URLQueryItem(name: "or",     value: "(requester_id.eq.\(userID),addressee_id.eq.\(userID))"),
+                URLQueryItem(name: "status", value: "eq.accepted"),
+                URLQueryItem(name: "select", value: "requester_id,addressee_id")
+            ])
+            let rows = try JSONDecoder().decode([DBFriendshipIDs].self, from: data)
+            let ids  = rows.map { $0.requesterID == userID ? $0.addresseeID : $0.requesterID }
+            guard !ids.isEmpty else { friends = []; return }
+            let profileData = try await SupabaseClient.get("/rest/v1/profiles", query: [
+                URLQueryItem(name: "id",     value: "in.(\(ids.joined(separator: ",")))"),
+                URLQueryItem(name: "select", value: "id,username,display_name,avatar_url,avatar_color")
+            ])
+            let profiles = try JSONDecoder().decode([DBProfileSlim].self, from: profileData)
+            friends = profiles.map { $0.toUser() }
+        } catch {}
+    }
+
+    private func fetchIncoming(userID: String) async {
+        do {
+            let data = try await SupabaseClient.get("/rest/v1/friendships", query: [
+                URLQueryItem(name: "addressee_id", value: "eq.\(userID)"),
+                URLQueryItem(name: "status",       value: "eq.pending"),
+                URLQueryItem(name: "select",       value: "id,requester_id,addressee_id,status,created_at")
+            ])
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            incoming = try decoder.decode([Friendship].self, from: data)
+        } catch {}
+    }
+
+    private func refreshStatusCache(myID: String) async {
+        let ids = searchResults.map { $0.id }
+        guard !ids.isEmpty else { return }
+        do {
+            let data = try await SupabaseClient.get("/rest/v1/friendships", query: [
+                URLQueryItem(name: "or",     value: ids.map {
+                    "(and(requester_id.eq.\(myID),addressee_id.eq.\($0)),and(requester_id.eq.\($0),addressee_id.eq.\(myID)))"
+                }.joined(separator: ",")),
+                URLQueryItem(name: "select", value: "requester_id,addressee_id,status")
+            ])
+            let rows = try JSONDecoder().decode([DBFriendshipStatus].self, from: data)
+            for row in rows {
+                let friendID = row.requesterID == myID ? row.addresseeID : row.requesterID
+                statusCache[friendID] = row.status
+            }
+        } catch {}
+    }
+}
+
+private struct DBFriendshipIDs: Decodable {
+    let requesterID: String
+    let addresseeID: String
+    enum CodingKeys: String, CodingKey {
+        case requesterID = "requester_id"; case addresseeID = "addressee_id"
+    }
+}
+
+private struct DBFriendshipStatus: Decodable {
+    let requesterID: String; let addresseeID: String; let status: String
+    enum CodingKeys: String, CodingKey {
+        case requesterID = "requester_id"; case addresseeID = "addressee_id"; case status
+    }
+}
+
+private struct DBProfileSlim: Decodable {
+    let id: String; let username: String
+    let displayName: String?; let avatarUrl: String?; let avatarColor: String?
+    enum CodingKeys: String, CodingKey {
+        case id, username
+        case displayName = "display_name"; case avatarUrl = "avatar_url"; case avatarColor = "avatar_color"
+    }
+    func toUser() -> User {
+        User(id: id, username: username, displayName: displayName ?? username,
+             avatarURL: avatarUrl, avatarColor: avatarColor ?? "#1A1A1A", bio: "", friendIDs: [])
     }
 }
 

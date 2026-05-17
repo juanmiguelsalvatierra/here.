@@ -29,6 +29,10 @@ final class AuthViewModel: ObservableObject {
 
     // MARK: Sign Up
     func signUp(email: String, password: String) async {
+        guard password.count >= 6 else {
+            errorMessage = "Passwort muss mindestens 6 Zeichen lang sein."
+            return
+        }
         isLoading = true; errorMessage = nil
         defer { isLoading = false }
         do {
@@ -39,6 +43,10 @@ final class AuthViewModel: ObservableObject {
             isLoggedIn  = true
         } catch AuthError.emailNotConfirmed {
             errorMessage = "Bitte bestätige deine E-Mail-Adresse."
+        } catch AuthError.emailAlreadyExists {
+            errorMessage = "Diese E-Mail ist bereits registriert. Bitte einloggen."
+        } catch AuthError.weakPassword {
+            errorMessage = "Passwort muss mindestens 6 Zeichen lang sein."
         } catch {
             errorMessage = "Registrierung fehlgeschlagen – bitte nochmal versuchen."
         }
@@ -85,21 +93,34 @@ final class AuthViewModel: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 400 {
+
+        // Parse error body for all non-200 responses
+        if status != 200 {
             if let body = try? JSONDecoder().decode(SupabaseError.self, from: data) {
-                if body.message.contains("Email not confirmed") { throw AuthError.emailNotConfirmed }
-                if body.message.contains("Invalid login")       { throw AuthError.invalidCredentials }
+                let msg = body.message.lowercased()
+                if msg.contains("email not confirmed")         { throw AuthError.emailNotConfirmed }
+                if msg.contains("invalid login")               { throw AuthError.invalidCredentials }
+                if msg.contains("user already registered")     { throw AuthError.emailAlreadyExists }
+                if msg.contains("password should be")          { throw AuthError.weakPassword }
+                if msg.contains("weak password")               { throw AuthError.weakPassword }
             }
             throw URLError(.badServerResponse)
         }
-        guard status == 200 else { throw URLError(.badServerResponse) }
-        return try JSONDecoder().decode(AuthResponse.self, from: data)
+
+        // Signup with email confirmation enabled returns 200 but no access_token
+        if let decoded = try? JSONDecoder().decode(AuthResponse.self, from: data),
+           !decoded.accessToken.isEmpty {
+            return decoded
+        }
+
+        // If we land here, email confirmation is required
+        throw AuthError.emailNotConfirmed
     }
 
     private func fetchAuthUser(token: String) async throws -> AuthUser {
         let u = URL(string: "\(url)/auth/v1/user")!
         var req = URLRequest(url: u)
-        req.setValue(key,           forHTTPHeaderField: "apikey")
+        req.setValue(key,               forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.userAuthenticationRequired) }
@@ -114,9 +135,9 @@ final class AuthViewModel: ObservableObject {
             URLQueryItem(name: "limit",  value: "1")
         ]
         var req = URLRequest(url: comps.url!)
-        req.setValue(key,                    forHTTPHeaderField: "apikey")
-        req.setValue("Bearer \(token)",      forHTTPHeaderField: "Authorization")
-        req.setValue("application/json",     forHTTPHeaderField: "Accept")
+        req.setValue(key,               forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, _) = try await URLSession.shared.data(for: req)
         let rows = try JSONDecoder().decode([DBProfile].self, from: data)
         guard let p = rows.first else { throw URLError(.cannotFindHost) }
@@ -130,7 +151,9 @@ final class AuthViewModel: ObservableObject {
 }
 
 // MARK: - Errors
-private enum AuthError: Error { case emailNotConfirmed, invalidCredentials }
+private enum AuthError: Error {
+    case emailNotConfirmed, invalidCredentials, emailAlreadyExists, weakPassword
+}
 
 // MARK: - Response types
 private struct AuthResponse: Decodable {
@@ -140,7 +163,16 @@ private struct AuthResponse: Decodable {
     }
 }
 private struct AuthUser:     Decodable { let id: String; let email: String? }
-private struct SupabaseError: Decodable { let message: String }
+private struct SupabaseError: Decodable {
+    let message: String
+    enum CodingKeys: String, CodingKey { case message, msg }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        message = (try? c.decode(String.self, forKey: .message))
+               ?? (try? c.decode(String.self, forKey: .msg))
+               ?? "unknown error"
+    }
+}
 private struct DBProfile: Decodable {
     let id: String; let username: String
     let displayName: String?; let avatarUrl: String?; let avatarColor: String?; let bio: String?

@@ -37,6 +37,7 @@ struct LocationPost: Identifiable, Codable {
     var joinedUserIDs: [String]
     var joinedUsers: [User]?
     var comments: [Comment] = []
+    var visibility: PostVisibility = .friends
     var isFavorited: Bool = false
 
     var timeAgo: String {
@@ -83,6 +84,44 @@ struct Comment: Identifiable, Codable {
         case ..<86400:     return "vor \(Int(diff/3600))h"
         default:           return "vor \(Int(diff/86400))d"
         }
+    }
+}
+
+// MARK: - Post Visibility
+enum PostVisibility: String, Codable {
+    case friends  = "friends"   // all mutual friends
+    case selected = "selected"  // specific chosen friends
+    case city     = "public"    // everyone (city-level)
+
+    var label: String {
+        switch self {
+        case .friends:  return "Freunde"
+        case .selected: return "Auswahl"
+        case .city:     return "Stadt"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .friends:  return "person.2"
+        case .selected: return "person.badge.plus"
+        case .city:     return "building.2"
+        }
+    }
+}
+
+// MARK: - Friendship
+struct Friendship: Identifiable, Codable {
+    let id:          String
+    let requesterID: String
+    let addresseeID: String
+    var status:      String   // "pending" | "accepted"
+    var createdAt:   Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case requesterID = "requester_id"
+        case addresseeID = "addressee_id"
+        case createdAt   = "created_at"
     }
 }
 

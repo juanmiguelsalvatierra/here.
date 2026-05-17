@@ -2,9 +2,11 @@ import SwiftUI
 
 // MARK: - Profile View
 struct ProfileView: View {
-    @EnvironmentObject var authVM: AuthViewModel
-    @EnvironmentObject var feedVM: FeedViewModel
+    @EnvironmentObject var authVM:   AuthViewModel
+    @EnvironmentObject var feedVM:   FeedViewModel
+    @EnvironmentObject var friendVM: FriendViewModel
     @State private var showLogoutAlert = false
+    @State private var showFriends     = false
 
     private var myPosts: [LocationPost] {
         feedVM.posts.filter { $0.authorID == authVM.currentUser.id }
@@ -43,7 +45,10 @@ struct ProfileView: View {
                     HStack(spacing: 0) {
                         StatCell(value: "\(myPosts.count)", label: "posts")
                         Divider().frame(height: 28)
-                        StatCell(value: "\(authVM.currentUser.friendIDs.count)", label: "freunde")
+                        Button { showFriends = true } label: {
+                            StatCell(value: "\(friendVM.friends.count)", label: "freunde")
+                        }
+                        .buttonStyle(.plain)
                         Divider().frame(height: 28)
                         StatCell(value: "\(myPosts.flatMap { $0.joinedUserIDs }.count)", label: "joins")
                     }
@@ -70,7 +75,10 @@ struct ProfileView: View {
 
                     // Settings
                     VStack(spacing: 0) {
-                        SettingsRow(icon: "person.2", label: "freunde finden")
+                        Button { showFriends = true } label: {
+                            SettingsRow(icon: "person.2", label: "freunde finden")
+                        }
+                        .buttonStyle(.plain)
                         SettingsRow(icon: "bell", label: "benachrichtigungen")
                         SettingsRow(icon: "lock", label: "datenschutz")
                         SettingsRow(icon: "questionmark.circle", label: "hilfe")
@@ -97,6 +105,11 @@ struct ProfileView: View {
                 .padding(.horizontal, Here.Spacing.lg)
             }
             .background(Here.Color.white)
+        }
+        .sheet(isPresented: $showFriends) {
+            FriendSearchView()
+                .environmentObject(authVM)
+                .environmentObject(friendVM)
         }
         .alert("abmelden?", isPresented: $showLogoutAlert) {
             Button("abmelden", role: .destructive) { authVM.logout() }
@@ -256,4 +269,5 @@ struct NotificationRow: View {
     ProfileView()
         .environmentObject(AuthViewModel())
         .environmentObject(FeedViewModel())
+        .environmentObject(FriendViewModel())
 }
